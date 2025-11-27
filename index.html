@@ -1,36 +1,493 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DNI Reader</title>
+  <title>Control de ingreso por DNI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-td1dDYjCsDMbXQwUXFS/dryOGUIX0i4J6sC9H1C0/8XwNTcg1EjufhBiT4/c6/xMgSzcAUplQp7Y2Zz0gWnW6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <style>
     :root {
       color-scheme: light dark;
     }
 
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at 20% 20%, rgba(0, 128, 255, 0.15), transparent 40%),
-        radial-gradient(circle at 80% 0%, rgba(255, 99, 71, 0.12), transparent 40%),
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(0, 128, 255, 0.12), transparent 40%),
+        radial-gradient(circle at 80% 0%, rgba(255, 99, 71, 0.08), transparent 40%),
         linear-gradient(135deg, #0f172a, #111827 45%, #0b1020 100%);
-      color: #f8fafc;
-      text-align: center;
+      color: #e2e8f0;
+      padding: 2rem 1rem 3rem;
+    }
+
+    .layout {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
     }
 
     h1 {
-      font-size: clamp(2.5rem, 4vw + 1rem, 4.5rem);
-      letter-spacing: 0.06em;
+      font-size: clamp(2rem, 3vw + 1rem, 3.5rem);
+      letter-spacing: 0.04em;
       text-transform: uppercase;
       margin: 0;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 1.2rem 1.4rem;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(8px);
+    }
+
+    .card h2 {
+      margin-top: 0;
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.02em;
+    }
+
+    .grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      align-items: start;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    input,
+    button,
+    select {
+      width: 100%;
+      padding: 0.75rem 0.9rem;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      color: #e2e8f0;
+      font-size: 1rem;
+    }
+
+    input:focus,
+    button:focus {
+      outline: 2px solid #38bdf8;
+      outline-offset: 1px;
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      transition: transform 0.1s ease, box-shadow 0.2s ease;
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, #06b6d4, #3b82f6);
+      border: none;
+      color: #0b1020;
+      box-shadow: 0 12px 30px rgba(6, 182, 212, 0.35);
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .message {
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      margin-top: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .message.success {
+      border-color: rgba(34, 197, 94, 0.55);
+      background: rgba(22, 163, 74, 0.15);
+    }
+
+    .message.error {
+      border-color: rgba(248, 113, 113, 0.55);
+      background: rgba(248, 113, 113, 0.12);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .status-dot.green {
+      background: #34d399;
+    }
+
+    .status-dot.red {
+      background: #f87171;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      color: #cbd5e1;
+      font-size: 0.95rem;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0.75rem 0.6rem;
+      text-align: left;
+    }
+
+    th {
+      color: #e2e8f0;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    #qr-region {
+      width: 100%;
+      min-height: 220px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px dashed rgba(255, 255, 255, 0.25);
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: #cbd5e1;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .small {
+      font-size: 0.9rem;
+      color: #cbd5e1;
+    }
+
+    @media (max-width: 680px) {
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>DNI Reader</h1>
+  <div class="layout">
+    <header>
+      <div>
+        <p class="small" style="margin:0 0 0.25rem; opacity:0.8;">Control en tiempo real</p>
+        <h1>Control de ingresos por DNI</h1>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="download-btn" type="button">Descargar Excel</button>
+        <label for="file-input" class="secondary" style="display:inline-flex; align-items:center; justify-content:center; gap:0.4rem; cursor:pointer;">
+          📂 Cargar Excel
+        </label>
+        <input id="file-input" type="file" accept=".xlsx" style="display:none" />
+      </div>
+    </header>
+
+    <div class="grid two">
+      <section class="card">
+        <h2>Escanear QR del DNI</h2>
+        <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el Excel.</p>
+        <div class="grid">
+          <div id="qr-region">La cámara está apagada</div>
+          <button class="primary" id="toggle-scan">Iniciar cámara</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Ingresar DNI manualmente</h2>
+        <div class="grid">
+          <div>
+            <label for="dni-input">DNI</label>
+            <input id="dni-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Ej: 12345678" />
+          </div>
+          <button class="primary" id="check-btn">Verificar y registrar ingreso</button>
+          <div id="status" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Agregar persona autorizada</h2>
+      <div class="grid two">
+        <div>
+          <label for="new-dni">DNI</label>
+          <input id="new-dni" type="text" inputmode="numeric" placeholder="Ej: 20123456" />
+        </div>
+        <div>
+          <label for="new-name">Nombre</label>
+          <input id="new-name" type="text" placeholder="Nombre completo" />
+        </div>
+      </div>
+      <div class="actions" style="margin-top:1rem;">
+        <button class="secondary" id="add-btn">Agregar a la lista</button>
+      </div>
+      <p class="small" style="margin-top:0.75rem;">Si al iniciar la app no existe un archivo, se genera uno nuevo con las columnas DNI, Nombre, Último check-in y Total ingresos.</p>
+    </section>
+
+    <section class="card">
+      <h2>Listado registrado</h2>
+      <div class="small" style="margin-bottom:0.5rem;">La información se guarda en tu navegador y puedes descargarla como Excel en cualquier momento.</div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>DNI</th>
+              <th>Nombre</th>
+              <th>Último check-in</th>
+              <th>Total ingresos</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "dni-checkin-wb";
+    let workbook = null;
+    let html5QrCode = null;
+    let cameraRunning = false;
+
+    function createWorkbook() {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([
+        ["DNI", "Nombre", "Último check-in", "Total ingresos"],
+      ]);
+      XLSX.utils.book_append_sheet(wb, ws, "Registros");
+      saveWorkbook(wb);
+      return wb;
+    }
+
+    function saveWorkbook(wb) {
+      const data = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
+      localStorage.setItem(STORAGE_KEY, data);
+    }
+
+    function loadWorkbook() {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return XLSX.read(stored, { type: "base64" });
+      }
+      return createWorkbook();
+    }
+
+    function parseSheet() {
+      const ws = workbook.Sheets[workbook.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+    }
+
+    function updateSheet(rows) {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      workbook.Sheets[workbook.SheetNames[0]] = ws;
+      saveWorkbook(workbook);
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("table-body");
+      tbody.innerHTML = "";
+      const rows = parseSheet();
+      rows.slice(1).forEach((row) => {
+        if (!row || row.length === 0) return;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${row[0] ?? ""}</td>
+          <td>${row[1] ?? ""}</td>
+          <td>${row[2] ?? ""}</td>
+          <td>${row[3] ?? 0}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function normalizeDni(value) {
+      return (value || "").replace(/\D/g, "");
+    }
+
+    function showMessage(message, type = "success") {
+      const status = document.getElementById("status");
+      status.innerHTML = `
+        <div class="message ${type}">
+          <span class="status-dot ${type === "success" ? "green" : "red"}"></span>
+          <span>${message}</span>
+        </div>
+      `;
+    }
+
+    function findRowIndex(rows, dni) {
+      return rows.findIndex((row, index) => index > 0 && normalizeDni(String(row[0])) === dni);
+    }
+
+    function registerEntry(dni) {
+      const cleanDni = normalizeDni(dni);
+      if (!cleanDni) {
+        showMessage("Ingresa un DNI válido.", "error");
+        return;
+      }
+
+      const rows = parseSheet();
+      const idx = findRowIndex(rows, cleanDni);
+      if (idx === -1) {
+        showMessage("El DNI no existe en el Excel. Agrega la persona autorizada para continuar.", "error");
+        return;
+      }
+
+      const now = new Date();
+      const timestamp = now.toLocaleString();
+      rows[idx][2] = timestamp;
+      const total = Number(rows[idx][3] || 0) + 1;
+      rows[idx][3] = total;
+      updateSheet(rows);
+      showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${total}.`);
+    }
+
+    function addPerson() {
+      const dni = normalizeDni(document.getElementById("new-dni").value);
+      const name = document.getElementById("new-name").value.trim();
+      if (!dni) {
+        alert("Ingresa un DNI válido.");
+        return;
+      }
+
+      const rows = parseSheet();
+      const idx = findRowIndex(rows, dni);
+      if (idx !== -1) {
+        alert("Ese DNI ya está en la lista.");
+        return;
+      }
+
+      rows.push([dni, name, "", 0]);
+      updateSheet(rows);
+      document.getElementById("new-dni").value = "";
+      document.getElementById("new-name").value = "";
+      showMessage("Persona agregada al listado.");
+    }
+
+    function handleFileInput(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        workbook = XLSX.read(data, { type: "array" });
+        saveWorkbook(workbook);
+        renderTable();
+        showMessage("Excel cargado correctamente.");
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function downloadExcel() {
+      saveWorkbook(workbook);
+      XLSX.writeFile(workbook, "registros_dni.xlsx");
+    }
+
+    function extractDniFromText(text) {
+      const dniMatch = text.match(/\b\d{7,9}\b/);
+      if (dniMatch) return dniMatch[0];
+      const dniLabel = text.match(/DNI[:=](\d{7,9})/i);
+      return dniLabel ? dniLabel[1] : "";
+    }
+
+    async function toggleCamera() {
+      const qrRegion = document.getElementById("qr-region");
+      if (!cameraRunning) {
+        if (!html5QrCode) {
+          html5QrCode = new Html5Qrcode("qr-region");
+        }
+        try {
+          await html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: 220 },
+            (decodedText) => {
+              const extracted = extractDniFromText(decodedText);
+              if (extracted) {
+                document.getElementById("dni-input").value = extracted;
+                registerEntry(extracted);
+              }
+            },
+            () => {}
+          );
+          cameraRunning = true;
+          document.getElementById("toggle-scan").textContent = "Detener cámara";
+        } catch (error) {
+          qrRegion.textContent = "No se pudo acceder a la cámara.";
+          showMessage("No se pudo iniciar la cámara.", "error");
+        }
+      } else {
+        await html5QrCode.stop();
+        qrRegion.innerHTML = "La cámara está apagada";
+        cameraRunning = false;
+        document.getElementById("toggle-scan").textContent = "Iniciar cámara";
+      }
+    }
+
+    function init() {
+      workbook = loadWorkbook();
+      renderTable();
+      document.getElementById("check-btn").addEventListener("click", () => {
+        const dniValue = document.getElementById("dni-input").value;
+        registerEntry(dniValue);
+      });
+      document.getElementById("add-btn").addEventListener("click", addPerson);
+      document.getElementById("file-input").addEventListener("change", handleFileInput);
+      document.getElementById("download-btn").addEventListener("click", downloadExcel);
+      document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
+      document.getElementById("dni-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          registerEntry(e.target.value);
+        }
+      });
+    }
+
+    init();
+  </script>
 </body>
 </html>
