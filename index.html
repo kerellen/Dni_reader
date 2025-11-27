@@ -196,6 +196,10 @@
       flex-wrap: wrap;
     }
 
+    .actions.inline {
+      justify-content: flex-end;
+    }
+
     .small {
       font-size: 0.9rem;
       color: #cbd5e1;
@@ -327,6 +331,7 @@
               <th>Nombre</th>
               <th>Último check-in</th>
               <th>Total ingresos</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
@@ -338,6 +343,7 @@
     <script>
       const STORAGE_KEY = "dni-checkin-data";
       let records = [];
+      let editingDni = null;
       let cameraRunning = false;
       let stream = null;
       let detector = null;
@@ -350,24 +356,52 @@
         return (value || "").replace(/\D/g, "");
       }
 
-      function loadData() {
+      async function loadData() {
+        const localData = (() => {
+          try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+              return JSON.parse(stored);
+            }
+          } catch (error) {
+            console.warn("No se pudo leer el almacenamiento local", error);
+          }
+          return [];
+        })();
+
         try {
-          const stored = localStorage.getItem(STORAGE_KEY);
-          if (stored) {
-            return JSON.parse(stored);
+          const response = await fetch("/api/records");
+          if (!response.ok) throw new Error("Respuesta no válida del servidor");
+          const payload = await response.json();
+          if (Array.isArray(payload?.records)) {
+            return payload.records;
           }
         } catch (error) {
-          console.warn("No se pudo leer el almacenamiento local", error);
+          console.warn("No se pudo sincronizar con el servidor, usando datos locales", error);
         }
-        return [];
+
+        return localData;
       }
 
-      function saveData() {
+      async function syncServerData() {
+        try {
+          await fetch("/api/records", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(records),
+          });
+        } catch (error) {
+          console.warn("No se pudo guardar el archivo en el servidor", error);
+        }
+      }
+
+      async function saveData() {
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
         } catch (error) {
-          console.warn("No se pudo guardar el listado", error);
+          console.warn("No se pudo guardar el listado localmente", error);
         }
+        await syncServerData();
       }
 
       function renderTable() {
@@ -375,12 +409,33 @@
         tbody.innerHTML = "";
         records.forEach((item) => {
           const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${item.dni}</td>
-            <td>${item.name || ""}</td>
-            <td>${item.lastCheck || ""}</td>
-            <td>${item.total || 0}</td>
-          `;
+          if (editingDni === item.dni) {
+            tr.innerHTML = `
+              <td>${item.dni}</td>
+              <td><input id="edit-name-${item.dni}" type="text" value="${item.name || ""}" /></td>
+              <td>${item.lastCheck || ""}</td>
+              <td><input id="edit-total-${item.dni}" type="number" min="0" value="${item.total || 0}" /></td>
+              <td>
+                <div class="actions inline">
+                  <button data-action="save-edit" data-dni="${item.dni}" class="primary">Guardar</button>
+                  <button data-action="cancel-edit" data-dni="${item.dni}" class="secondary">Cancelar</button>
+                </div>
+              </td>
+            `;
+          } else {
+            tr.innerHTML = `
+              <td>${item.dni}</td>
+              <td>${item.name || ""}</td>
+              <td>${item.lastCheck || ""}</td>
+              <td>${item.total || 0}</td>
+              <td>
+                <div class="actions inline">
+                  <button data-action="edit" data-dni="${item.dni}" class="secondary">Editar</button>
+                  <button data-action="delete" data-dni="${item.dni}" class="secondary">Borrar</button>
+                </div>
+              </td>
+            `;
+          }
           tbody.appendChild(tr);
         });
       }
@@ -415,7 +470,7 @@
         }
       }
 
-      function registerEntry(dni) {
+      async function registerEntry(dni) {
         const cleanDni = normalizeDni(dni);
         if (!cleanDni) {
           showMessage("Ingresa un DNI válido.", "error");
@@ -431,12 +486,12 @@
         const now = new Date();
         person.lastCheck = now.toLocaleString();
         person.total = (person.total || 0) + 1;
-        saveData();
+        await saveData();
         renderTable();
         showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${person.total}.`);
       }
 
-      function addPerson() {
+      async function addPerson() {
         const dni = normalizeDni(document.getElementById("new-dni").value);
         const name = document.getElementById("new-name").value.trim();
         if (!dni) {
@@ -451,11 +506,58 @@
         }
 
         records.push({ dni, name, lastCheck: "", total: 0 });
-        saveData();
+        await saveData();
         renderTable();
         document.getElementById("new-dni").value = "";
         document.getElementById("new-name").value = "";
         showMessage("Persona agregada al listado.");
+      }
+
+      function startEdit(dni) {
+        editingDni = dni;
+        renderTable();
+      }
+
+      function cancelEdit() {
+        editingDni = null;
+        renderTable();
+      }
+
+      async function saveEdit(dni) {
+        const person = records.find((row) => row.dni === dni);
+        if (!person) return;
+        const nameInput = document.getElementById(`edit-name-${dni}`);
+        const totalInput = document.getElementById(`edit-total-${dni}`);
+        person.name = nameInput?.value?.trim() || "";
+        person.total = Math.max(0, Number(totalInput?.value) || 0);
+        await saveData();
+        editingDni = null;
+        renderTable();
+        showMessage("Registro actualizado.");
+      }
+
+      async function deletePerson(dni) {
+        records = records.filter((row) => row.dni !== dni);
+        await saveData();
+        renderTable();
+        showMessage("Registro eliminado.");
+      }
+
+      function handleTableClick(event) {
+        const action = event.target?.dataset?.action;
+        const dni = event.target?.dataset?.dni;
+        if (!action || !dni) return;
+        if (action === "edit") {
+          startEdit(dni);
+        } else if (action === "delete") {
+          if (confirm("¿Eliminar este registro?")) {
+            deletePerson(dni);
+          }
+        } else if (action === "save-edit") {
+          saveEdit(dni);
+        } else if (action === "cancel-edit") {
+          cancelEdit();
+        }
       }
 
     function parseCsv(text) {
@@ -622,8 +724,8 @@
         }
       }
 
-      function init() {
-        records = loadData();
+      async function init() {
+        records = await loadData();
         renderTable();
         updateScanPreview("", "");
         document.getElementById("check-btn").addEventListener("click", () => {
@@ -637,6 +739,9 @@
         });
         document.getElementById("download-btn").addEventListener("click", downloadData);
         document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
+        document
+          .getElementById("table-body")
+          .addEventListener("click", handleTableClick);
         document.getElementById("confirm-scan").addEventListener("click", () => {
           if (!lastScannedDni) {
             showMessage("Aún no hay un DNI detectado desde el QR.", "error");
