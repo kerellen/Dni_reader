@@ -350,6 +350,27 @@
       let videoEl = null;
       let lastScannedDni = "";
       let lastScannedRaw = "";
+      const LOCAL_STORAGE_KEY = "dni_reader_records";
+
+      function loadLocalRecords() {
+        try {
+          const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          console.warn("No se pudo leer la copia local de datos", error);
+          return [];
+        }
+      }
+
+      function persistLocalRecords(data) {
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data || []));
+        } catch (error) {
+          console.warn("No se pudo guardar la copia local de datos", error);
+        }
+      }
 
       async function getDetectorFormats() {
         if (typeof BarcodeDetector?.getSupportedFormats === "function") {
@@ -369,16 +390,28 @@
       }
 
       async function loadData() {
+        const localCopy = loadLocalRecords();
         try {
           const response = await fetch("/api/records");
           if (!response.ok) throw new Error("Respuesta no válida del servidor");
           const payload = await response.json();
-          if (Array.isArray(payload?.records)) return payload.records;
+          if (Array.isArray(payload?.records)) {
+            persistLocalRecords(payload.records);
+            return payload.records;
+          }
         } catch (error) {
           console.warn("No se pudo sincronizar con el servidor", error);
-          showMessage("No se pudo cargar la información desde el servidor.", "error");
         }
 
+        if (localCopy.length) {
+          showMessage(
+            "No se pudo cargar la información desde el servidor. Se usará la copia guardada en este navegador.",
+            "error"
+          );
+          return localCopy;
+        }
+
+        showMessage("No se pudo cargar la información desde el servidor.", "error");
         return [];
       }
 
@@ -394,10 +427,15 @@
           if (Array.isArray(payload?.records)) {
             records = payload.records;
           }
+          persistLocalRecords(records);
           return true;
         } catch (error) {
           console.warn("No se pudo guardar el archivo en el servidor", error);
-          showMessage("No se pudo guardar la información en el servidor.", "error");
+          persistLocalRecords(records);
+          showMessage(
+            "No se pudo guardar la información en el servidor. Se mantendrá una copia local en este navegador.",
+            "error"
+          );
           return false;
         }
       }
