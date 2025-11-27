@@ -222,9 +222,7 @@
       </div>
       <div class="actions">
         <button class="secondary" id="download-btn" type="button">Descargar Excel</button>
-        <label for="file-input" class="secondary" style="display:inline-flex; align-items:center; justify-content:center; gap:0.4rem; cursor:pointer;">
-          📂 Cargar Excel
-        </label>
+        <button class="secondary" id="upload-btn" type="button">📂 Cargar Excel</button>
         <input id="file-input" type="file" accept=".xlsx" style="display:none" />
       </div>
     </header>
@@ -313,7 +311,12 @@
     function loadWorkbook() {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        return XLSX.read(stored, { type: "base64" });
+        try {
+          return XLSX.read(stored, { type: "base64" });
+        } catch (error) {
+          console.error("No se pudo leer el Excel guardado", error);
+          showMessage("Hubo un problema al leer el archivo guardado. Se generará uno nuevo.", "error");
+        }
       }
       return createWorkbook();
     }
@@ -413,13 +416,24 @@
     function handleFileInput(event) {
       const file = event.target.files?.[0];
       if (!file) return;
+
       const reader = new FileReader();
       reader.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        workbook = XLSX.read(data, { type: "array" });
-        saveWorkbook(workbook);
-        renderTable();
-        showMessage("Excel cargado correctamente.");
+        try {
+          const data = new Uint8Array(e.target.result);
+          workbook = XLSX.read(data, { type: "array" });
+          saveWorkbook(workbook);
+          renderTable();
+          showMessage("Excel cargado correctamente.");
+        } catch (error) {
+          console.error("Error al leer el archivo subido", error);
+          showMessage("El archivo no es válido o está dañado. Intenta con otro Excel.", "error");
+        } finally {
+          event.target.value = "";
+        }
+      };
+      reader.onerror = () => {
+        showMessage("No se pudo leer el archivo seleccionado.", "error");
       };
       reader.readAsArrayBuffer(file);
     }
@@ -439,6 +453,20 @@
     async function toggleCamera() {
       const qrRegion = document.getElementById("qr-region");
       if (!cameraRunning) {
+        if (!window.isSecureContext) {
+          qrRegion.textContent = "Activa la cámara abriendo la página desde https:// o http://localhost";
+          showMessage("El navegador bloqueó la cámara por no ser un sitio seguro.", "error");
+          return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          qrRegion.textContent = "Tu navegador no permite acceder a la cámara.";
+          showMessage("La cámara no está disponible en este navegador.", "error");
+          return;
+        }
+
+        qrRegion.textContent = "Iniciando cámara...";
+
         if (!html5QrCode) {
           html5QrCode = new Html5Qrcode("qr-region");
         }
@@ -458,11 +486,12 @@
           cameraRunning = true;
           document.getElementById("toggle-scan").textContent = "Detener cámara";
         } catch (error) {
+          console.error("No se pudo iniciar la cámara", error);
           qrRegion.textContent = "No se pudo acceder a la cámara.";
-          showMessage("No se pudo iniciar la cámara.", "error");
+          showMessage("No se pudo iniciar la cámara. Revisa los permisos del navegador.", "error");
         }
       } else {
-        await html5QrCode.stop();
+        await html5QrCode.stop().catch(() => {});
         qrRegion.innerHTML = "La cámara está apagada";
         cameraRunning = false;
         document.getElementById("toggle-scan").textContent = "Iniciar cámara";
@@ -478,6 +507,9 @@
       });
       document.getElementById("add-btn").addEventListener("click", addPerson);
       document.getElementById("file-input").addEventListener("change", handleFileInput);
+      document.getElementById("upload-btn").addEventListener("click", () => {
+        document.getElementById("file-input").click();
+      });
       document.getElementById("download-btn").addEventListener("click", downloadExcel);
       document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
       document.getElementById("dni-input").addEventListener("keydown", (e) => {
