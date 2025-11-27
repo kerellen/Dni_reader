@@ -458,9 +458,31 @@
     }
 
     function extractDniFromText(text) {
-      const dniMatch = text.match(/\b\d{7,9}\b/);
-      if (dniMatch) return dniMatch[0];
-      const dniLabel = text.match(/DNI[:=](\d{7,9})/i);
+      const payload = (text || "").trim();
+      if (!payload) return "";
+
+      const jsonMatch = payload.match(/\{.*\}/s);
+      if (jsonMatch) {
+        try {
+          const data = JSON.parse(jsonMatch[0]);
+          const dniCandidate = normalizeDni(data.dni || data.DNI || data.numero_documento || "");
+          if (dniCandidate.length >= 7 && dniCandidate.length <= 9) return dniCandidate;
+        } catch (error) {
+          console.warn("No se pudo interpretar el JSON del QR", error);
+        }
+      }
+
+      if (payload.includes("@")) {
+        for (const part of payload.split("@")) {
+          const dniCandidate = normalizeDni(part);
+          if (dniCandidate.length >= 7 && dniCandidate.length <= 9) return dniCandidate;
+        }
+      }
+
+      const dniMatch = payload.match(/(\d{7,9})/);
+      if (dniMatch) return dniMatch[1];
+
+      const dniLabel = payload.match(/DNI[:=]?(\d{7,9})/i);
       return dniLabel ? dniLabel[1] : "";
     }
 
