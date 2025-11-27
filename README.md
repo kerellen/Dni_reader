@@ -3,7 +3,7 @@
 Aplicación web sencilla para verificar DNI argentinos escaneando el QR del documento o ingresándolo manualmente. Valida contra un archivo Excel local y marca el check-in si el DNI existe.
 
 ## Características
-- Escaneo con cámara del QR del DNI (usa `html5-qrcode`).
+- Escaneo con cámara del QR/PDF417 del DNI usando `BarcodeDetector` nativo.
 - Ingreso manual del DNI.
 - Si el Excel no existe al abrir la app se genera uno nuevo con columnas básicas.
 - Permite cargar un Excel existente o descargar el actualizado.

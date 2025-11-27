@@ -271,8 +271,8 @@
 
     <div class="grid two">
         <section class="card">
-          <h2>Escanear QR del DNI</h2>
-          <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el listado.</p>
+          <h2>Escanear QR/PDF417 del DNI</h2>
+          <p class="small">Usa la cámara para leer el código QR o PDF417 del DNI argentino. El número detectado se validará en el listado.</p>
           <div class="grid">
             <div id="qr-region">La cámara está apagada</div>
             <div class="grid">
@@ -351,6 +351,19 @@
       let videoEl = null;
       let lastScannedDni = "";
       let lastScannedRaw = "";
+
+      async function getDetectorFormats() {
+        if (typeof BarcodeDetector?.getSupportedFormats === "function") {
+          try {
+            const supported = await BarcodeDetector.getSupportedFormats();
+            const desired = ["qr_code", "pdf417"].filter((fmt) => supported.includes(fmt));
+            if (desired.length) return desired;
+          } catch (error) {
+            console.warn("No se pudieron consultar los formatos soportados", error);
+          }
+        }
+        return ["qr_code", "pdf417"];
+      }
 
       function normalizeDni(value) {
         return (value || "").replace(/\D/g, "");
@@ -701,7 +714,11 @@
         }
 
         try {
-          detector = new BarcodeDetector({ formats: ["qr_code"] });
+          const formats = await getDetectorFormats();
+          if (!formats.includes("pdf417")) {
+            showMessage("El navegador no soporta PDF417, se intentará con otros formatos disponibles.", "error");
+          }
+          detector = new BarcodeDetector({ formats });
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
           if (!videoEl) {
             videoEl = document.createElement("video");
