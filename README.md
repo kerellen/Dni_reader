@@ -11,7 +11,7 @@ Aplicación web sencilla para verificar DNI argentinos escaneando el QR del docu
 
 ## Uso
 1. Instala dependencias con `npm install` y levanta el servidor con `npm start` para que los registros se guarden en el servidor (`data/registros_dni.json`).
-2. Abre `http://localhost:3000` en tu navegador.
+2. Abre `http://localhost:3000` en tu navegador. Si abres `index.html` directamente como archivo local, la aplicación intentará conectarse al servidor en `http://localhost:3000` y usará la copia local como respaldo en caso de no poder guardar en el servidor.
 3. Si no hay datos previos, se creará un archivo vacío en el servidor para comenzar a registrar los ingresos.
 4. Escanea el QR del DNI o escribe el número para registrarlo.
 5. Usa "Cargar Excel" para importar un listado existente o "Descargar Excel" para guardar los cambios en CSV.
