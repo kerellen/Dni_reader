@@ -7,8 +7,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-td1dDYjCsDMbXQwUXFS/dryOGUIX0i4J6sC9H1C0/8XwNTcg1EjufhBiT4/c6/xMgSzcAUplQp7Y2Zz0gWnW6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -188,6 +186,8 @@
       display: grid;
       place-items: center;
       color: #cbd5e1;
+      position: relative;
+      overflow: hidden;
     }
 
     .actions {
@@ -199,6 +199,16 @@
     .small {
       font-size: 0.9rem;
       color: #cbd5e1;
+    }
+
+    .muted {
+      opacity: 0.8;
+    }
+
+    video.scanner {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     @media (max-width: 680px) {
@@ -221,16 +231,16 @@
         <h1>Control de ingresos por DNI</h1>
       </div>
       <div class="actions">
-        <button class="secondary" id="download-btn" type="button">Descargar Excel</button>
-        <button class="secondary" id="upload-btn" type="button">📂 Cargar Excel</button>
-        <input id="file-input" type="file" accept=".xlsx" style="display:none" />
+        <button class="secondary" id="download-btn" type="button">Descargar Excel (CSV)</button>
+        <button class="secondary" id="upload-btn" type="button">📂 Cargar listado</button>
+        <input id="file-input" type="file" accept=".csv,.txt" style="display:none" />
       </div>
     </header>
 
     <div class="grid two">
       <section class="card">
         <h2>Escanear QR del DNI</h2>
-        <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el Excel.</p>
+        <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el listado.</p>
         <div class="grid">
           <div id="qr-region">La cámara está apagada</div>
           <button class="primary" id="toggle-scan">Iniciar cámara</button>
@@ -270,7 +280,7 @@
 
     <section class="card">
       <h2>Listado registrado</h2>
-      <div class="small" style="margin-bottom:0.5rem;">La información se guarda en tu navegador y puedes descargarla como Excel en cualquier momento.</div>
+      <div class="small" style="margin-bottom:0.5rem;">La información se guarda en tu navegador y puedes descargarla como CSV compatible con Excel en cualquier momento.</div>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -288,70 +298,51 @@
   </div>
 
   <script>
-    const STORAGE_KEY = "dni-checkin-wb";
-    let workbook = null;
-    let html5QrCode = null;
+    const STORAGE_KEY = "dni-checkin-data";
+    let records = [];
     let cameraRunning = false;
+    let stream = null;
+    let detector = null;
+    let scanHandle = null;
+    let videoEl = null;
 
-    function createWorkbook() {
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet([
-        ["DNI", "Nombre", "Último check-in", "Total ingresos"],
-      ]);
-      XLSX.utils.book_append_sheet(wb, ws, "Registros");
-      saveWorkbook(wb);
-      return wb;
+    function normalizeDni(value) {
+      return (value || "").replace(/\D/g, "");
     }
 
-    function saveWorkbook(wb) {
-      const data = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
-      localStorage.setItem(STORAGE_KEY, data);
-    }
-
-    function loadWorkbook() {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        try {
-          return XLSX.read(stored, { type: "base64" });
-        } catch (error) {
-          console.error("No se pudo leer el Excel guardado", error);
-          showMessage("Hubo un problema al leer el archivo guardado. Se generará uno nuevo.", "error");
+    function loadData() {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          return JSON.parse(stored);
         }
+      } catch (error) {
+        console.warn("No se pudo leer el almacenamiento local", error);
       }
-      return createWorkbook();
+      return [];
     }
 
-    function parseSheet() {
-      const ws = workbook.Sheets[workbook.SheetNames[0]];
-      return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
-    }
-
-    function updateSheet(rows) {
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      workbook.Sheets[workbook.SheetNames[0]] = ws;
-      saveWorkbook(workbook);
-      renderTable();
+    function saveData() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      } catch (error) {
+        console.warn("No se pudo guardar el listado", error);
+      }
     }
 
     function renderTable() {
       const tbody = document.getElementById("table-body");
       tbody.innerHTML = "";
-      const rows = parseSheet();
-      rows.slice(1).forEach((row) => {
-        if (!row || row.length === 0) return;
+      records.forEach((item) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>${row[0] ?? ""}</td>
-          <td>${row[1] ?? ""}</td>
-          <td>${row[2] ?? ""}</td>
-          <td>${row[3] ?? 0}</td>
+          <td>${item.dni}</td>
+          <td>${item.name || ""}</td>
+          <td>${item.lastCheck || ""}</td>
+          <td>${item.total || 0}</td>
         `;
         tbody.appendChild(tr);
       });
-    }
-
-    function normalizeDni(value) {
-      return (value || "").replace(/\D/g, "");
     }
 
     function showMessage(message, type = "success") {
@@ -364,10 +355,6 @@
       `;
     }
 
-    function findRowIndex(rows, dni) {
-      return rows.findIndex((row, index) => index > 0 && normalizeDni(String(row[0])) === dni);
-    }
-
     function registerEntry(dni) {
       const cleanDni = normalizeDni(dni);
       if (!cleanDni) {
@@ -375,20 +362,18 @@
         return;
       }
 
-      const rows = parseSheet();
-      const idx = findRowIndex(rows, cleanDni);
-      if (idx === -1) {
-        showMessage("El DNI no existe en el Excel. Agrega la persona autorizada para continuar.", "error");
+      const person = records.find((row) => row.dni === cleanDni);
+      if (!person) {
+        showMessage("El DNI no existe en el listado. Agrega la persona autorizada para continuar.", "error");
         return;
       }
 
       const now = new Date();
-      const timestamp = now.toLocaleString();
-      rows[idx][2] = timestamp;
-      const total = Number(rows[idx][3] || 0) + 1;
-      rows[idx][3] = total;
-      updateSheet(rows);
-      showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${total}.`);
+      person.lastCheck = now.toLocaleString();
+      person.total = (person.total || 0) + 1;
+      saveData();
+      renderTable();
+      showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${person.total}.`);
     }
 
     function addPerson() {
@@ -399,18 +384,25 @@
         return;
       }
 
-      const rows = parseSheet();
-      const idx = findRowIndex(rows, dni);
-      if (idx !== -1) {
+      const exists = records.some((row) => row.dni === dni);
+      if (exists) {
         alert("Ese DNI ya está en la lista.");
         return;
       }
 
-      rows.push([dni, name, "", 0]);
-      updateSheet(rows);
+      records.push({ dni, name, lastCheck: "", total: 0 });
+      saveData();
+      renderTable();
       document.getElementById("new-dni").value = "";
       document.getElementById("new-name").value = "";
       showMessage("Persona agregada al listado.");
+    }
+
+    function parseCsv(text) {
+      return text
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => line.split(",").map((cell) => cell.trim()));
     }
 
     function handleFileInput(event) {
@@ -420,14 +412,27 @@
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const data = new Uint8Array(e.target.result);
-          workbook = XLSX.read(data, { type: "array" });
-          saveWorkbook(workbook);
+          const text = e.target.result;
+          const rows = parseCsv(String(text));
+          const [header, ...body] = rows;
+          if (!header || normalizeDni(header[0]) !== "dni") {
+            throw new Error("Formato incompatible. Usa un CSV con encabezados DNI,Nombre,Último check-in,Total ingresos.");
+          }
+          records = body
+            .filter((row) => row.length)
+            .map((row) => ({
+              dni: normalizeDni(row[0]),
+              name: row[1] || "",
+              lastCheck: row[2] || "",
+              total: Number(row[3]) || 0,
+            }))
+            .filter((item) => item.dni);
+          saveData();
           renderTable();
-          showMessage("Excel cargado correctamente.");
+          showMessage("Listado cargado correctamente.");
         } catch (error) {
           console.error("Error al leer el archivo subido", error);
-          showMessage("El archivo no es válido o está dañado. Intenta con otro Excel.", "error");
+          showMessage("El archivo no es válido o está dañado. Intenta con otro CSV.", "error");
         } finally {
           event.target.value = "";
         }
@@ -435,12 +440,21 @@
       reader.onerror = () => {
         showMessage("No se pudo leer el archivo seleccionado.", "error");
       };
-      reader.readAsArrayBuffer(file);
+      reader.readAsText(file);
     }
 
-    function downloadExcel() {
-      saveWorkbook(workbook);
-      XLSX.writeFile(workbook, "registros_dni.xlsx");
+    function downloadData() {
+      const header = "DNI,Nombre,Último check-in,Total ingresos";
+      const body = records
+        .map((row) => [row.dni, row.name || "", row.lastCheck || "", row.total || 0].join(","))
+        .join("\n");
+      const csvContent = `${header}\n${body}`;
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "registros_dni.csv";
+      link.click();
+      URL.revokeObjectURL(link.href);
     }
 
     function extractDniFromText(text) {
@@ -450,56 +464,83 @@
       return dniLabel ? dniLabel[1] : "";
     }
 
+    async function scanFrame() {
+      if (!cameraRunning || !detector || !videoEl) return;
+      try {
+        const codes = await detector.detect(videoEl);
+        const first = codes?.[0];
+        if (first?.rawValue) {
+          const extracted = extractDniFromText(first.rawValue);
+          if (extracted) {
+            document.getElementById("dni-input").value = extracted;
+            registerEntry(extracted);
+          }
+        }
+      } catch (error) {
+        console.warn("No se pudo leer el cuadro de la cámara", error);
+      }
+      scanHandle = requestAnimationFrame(scanFrame);
+    }
+
+    function stopCamera() {
+      if (scanHandle) cancelAnimationFrame(scanHandle);
+      scanHandle = null;
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+      if (videoEl) {
+        videoEl.srcObject = null;
+      }
+      cameraRunning = false;
+      document.getElementById("qr-region").innerHTML = "La cámara está apagada";
+      document.getElementById("toggle-scan").textContent = "Iniciar cámara";
+    }
+
     async function toggleCamera() {
       const qrRegion = document.getElementById("qr-region");
-      if (!cameraRunning) {
-        if (!window.isSecureContext) {
-          qrRegion.textContent = "Activa la cámara abriendo la página desde https:// o http://localhost";
-          showMessage("El navegador bloqueó la cámara por no ser un sitio seguro.", "error");
-          return;
-        }
+      if (cameraRunning) {
+        stopCamera();
+        return;
+      }
 
-        if (!navigator.mediaDevices?.getUserMedia) {
-          qrRegion.textContent = "Tu navegador no permite acceder a la cámara.";
-          showMessage("La cámara no está disponible en este navegador.", "error");
-          return;
-        }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        qrRegion.textContent = "Tu navegador no permite acceder a la cámara.";
+        showMessage("La cámara no está disponible en este navegador.", "error");
+        return;
+      }
 
-        qrRegion.textContent = "Iniciando cámara...";
+      if (!("BarcodeDetector" in window)) {
+        qrRegion.textContent = "La detección de QR no está disponible en este navegador.";
+        showMessage("La lectura de QR requiere un navegador con BarcodeDetector.", "error");
+        return;
+      }
 
-        if (!html5QrCode) {
-          html5QrCode = new Html5Qrcode("qr-region");
+      try {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (!videoEl) {
+          videoEl = document.createElement("video");
+          videoEl.className = "scanner";
+          videoEl.setAttribute("autoplay", "true");
+          videoEl.setAttribute("playsinline", "true");
         }
-        try {
-          await html5QrCode.start(
-            { facingMode: "environment" },
-            { fps: 10, qrbox: 220 },
-            (decodedText) => {
-              const extracted = extractDniFromText(decodedText);
-              if (extracted) {
-                document.getElementById("dni-input").value = extracted;
-                registerEntry(extracted);
-              }
-            },
-            () => {}
-          );
-          cameraRunning = true;
-          document.getElementById("toggle-scan").textContent = "Detener cámara";
-        } catch (error) {
-          console.error("No se pudo iniciar la cámara", error);
-          qrRegion.textContent = "No se pudo acceder a la cámara.";
-          showMessage("No se pudo iniciar la cámara. Revisa los permisos del navegador.", "error");
-        }
-      } else {
-        await html5QrCode.stop().catch(() => {});
-        qrRegion.innerHTML = "La cámara está apagada";
-        cameraRunning = false;
-        document.getElementById("toggle-scan").textContent = "Iniciar cámara";
+        qrRegion.innerHTML = "";
+        qrRegion.appendChild(videoEl);
+        videoEl.srcObject = stream;
+        await videoEl.play();
+        cameraRunning = true;
+        document.getElementById("toggle-scan").textContent = "Detener cámara";
+        scanFrame();
+      } catch (error) {
+        console.error("No se pudo iniciar la cámara", error);
+        qrRegion.textContent = "No se pudo acceder a la cámara.";
+        showMessage("No se pudo iniciar la cámara. Revisa los permisos del navegador.", "error");
+        stopCamera();
       }
     }
 
     function init() {
-      workbook = loadWorkbook();
+      records = loadData();
       renderTable();
       document.getElementById("check-btn").addEventListener("click", () => {
         const dniValue = document.getElementById("dni-input").value;
@@ -510,7 +551,7 @@
       document.getElementById("upload-btn").addEventListener("click", () => {
         document.getElementById("file-input").click();
       });
-      document.getElementById("download-btn").addEventListener("click", downloadExcel);
+      document.getElementById("download-btn").addEventListener("click", downloadData);
       document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
       document.getElementById("dni-input").addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
