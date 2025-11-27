@@ -205,6 +205,34 @@
       opacity: 0.8;
     }
 
+    .scan-preview {
+      padding: 0.9rem 1rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.04);
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .scan-preview .label {
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      opacity: 0.9;
+    }
+
+    .scan-preview .raw {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.9rem;
+      word-break: break-word;
+      color: #cbd5e1;
+    }
+
+    .scan-preview .dni {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: #38bdf8;
+    }
+
     video.scanner {
       width: 100%;
       height: 100%;
@@ -238,14 +266,24 @@
     </header>
 
     <div class="grid two">
-      <section class="card">
-        <h2>Escanear QR del DNI</h2>
-        <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el listado.</p>
-        <div class="grid">
-          <div id="qr-region">La cámara está apagada</div>
-          <button class="primary" id="toggle-scan">Iniciar cámara</button>
-        </div>
-      </section>
+        <section class="card">
+          <h2>Escanear QR del DNI</h2>
+          <p class="small">Usa la cámara para leer el código del DNI argentino. El número detectado se validará en el listado.</p>
+          <div class="grid">
+            <div id="qr-region">La cámara está apagada</div>
+            <div class="grid">
+              <div class="scan-preview">
+                <div class="label">Último dato leído</div>
+                <div id="qr-raw" class="raw muted">Aún no se detecta un código.</div>
+                <div id="qr-dni" class="dni"></div>
+              </div>
+              <div class="actions">
+                <button class="primary" id="toggle-scan">Iniciar cámara</button>
+                <button class="secondary" id="confirm-scan" type="button" disabled>Confirmar DNI detectado</button>
+              </div>
+            </div>
+          </div>
+        </section>
 
       <section class="card">
         <h2>Ingresar DNI manualmente</h2>
@@ -297,106 +335,128 @@
     </section>
   </div>
 
-  <script>
-    const STORAGE_KEY = "dni-checkin-data";
-    let records = [];
-    let cameraRunning = false;
-    let stream = null;
-    let detector = null;
-    let scanHandle = null;
-    let videoEl = null;
+    <script>
+      const STORAGE_KEY = "dni-checkin-data";
+      let records = [];
+      let cameraRunning = false;
+      let stream = null;
+      let detector = null;
+      let scanHandle = null;
+      let videoEl = null;
+      let lastScannedDni = "";
+      let lastScannedRaw = "";
 
-    function normalizeDni(value) {
-      return (value || "").replace(/\D/g, "");
-    }
+      function normalizeDni(value) {
+        return (value || "").replace(/\D/g, "");
+      }
 
-    function loadData() {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          return JSON.parse(stored);
+      function loadData() {
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            return JSON.parse(stored);
+          }
+        } catch (error) {
+          console.warn("No se pudo leer el almacenamiento local", error);
         }
-      } catch (error) {
-        console.warn("No se pudo leer el almacenamiento local", error);
+        return [];
       }
-      return [];
-    }
 
-    function saveData() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-      } catch (error) {
-        console.warn("No se pudo guardar el listado", error);
+      function saveData() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+        } catch (error) {
+          console.warn("No se pudo guardar el listado", error);
+        }
       }
-    }
 
-    function renderTable() {
-      const tbody = document.getElementById("table-body");
-      tbody.innerHTML = "";
-      records.forEach((item) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${item.dni}</td>
-          <td>${item.name || ""}</td>
-          <td>${item.lastCheck || ""}</td>
-          <td>${item.total || 0}</td>
+      function renderTable() {
+        const tbody = document.getElementById("table-body");
+        tbody.innerHTML = "";
+        records.forEach((item) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.dni}</td>
+            <td>${item.name || ""}</td>
+            <td>${item.lastCheck || ""}</td>
+            <td>${item.total || 0}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function showMessage(message, type = "success") {
+        const status = document.getElementById("status");
+        status.innerHTML = `
+          <div class="message ${type}">
+            <span class="status-dot ${type === "success" ? "green" : "red"}"></span>
+            <span>${message}</span>
+          </div>
         `;
-        tbody.appendChild(tr);
-      });
-    }
-
-    function showMessage(message, type = "success") {
-      const status = document.getElementById("status");
-      status.innerHTML = `
-        <div class="message ${type}">
-          <span class="status-dot ${type === "success" ? "green" : "red"}"></span>
-          <span>${message}</span>
-        </div>
-      `;
-    }
-
-    function registerEntry(dni) {
-      const cleanDni = normalizeDni(dni);
-      if (!cleanDni) {
-        showMessage("Ingresa un DNI válido.", "error");
-        return;
       }
 
-      const person = records.find((row) => row.dni === cleanDni);
-      if (!person) {
-        showMessage("El DNI no existe en el listado. Agrega la persona autorizada para continuar.", "error");
-        return;
+      function updateScanPreview(rawText, dni) {
+        const rawEl = document.getElementById("qr-raw");
+        const dniEl = document.getElementById("qr-dni");
+        const confirmBtn = document.getElementById("confirm-scan");
+
+        lastScannedRaw = rawText || "";
+        lastScannedDni = normalizeDni(dni);
+
+        rawEl.textContent = lastScannedRaw || "Aún no se detecta un código.";
+        rawEl.classList.toggle("muted", !lastScannedRaw);
+
+        if (lastScannedDni) {
+          dniEl.textContent = `DNI detectado: ${lastScannedDni}`;
+          confirmBtn.disabled = false;
+        } else {
+          dniEl.textContent = "No se identificó un DNI válido en el código.";
+          confirmBtn.disabled = true;
+        }
       }
 
-      const now = new Date();
-      person.lastCheck = now.toLocaleString();
-      person.total = (person.total || 0) + 1;
-      saveData();
-      renderTable();
-      showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${person.total}.`);
-    }
+      function registerEntry(dni) {
+        const cleanDni = normalizeDni(dni);
+        if (!cleanDni) {
+          showMessage("Ingresa un DNI válido.", "error");
+          return;
+        }
 
-    function addPerson() {
-      const dni = normalizeDni(document.getElementById("new-dni").value);
-      const name = document.getElementById("new-name").value.trim();
-      if (!dni) {
-        alert("Ingresa un DNI válido.");
-        return;
+        const person = records.find((row) => row.dni === cleanDni);
+        if (!person) {
+          showMessage("El DNI no existe en el listado. Agrega la persona autorizada para continuar.", "error");
+          return;
+        }
+
+        const now = new Date();
+        person.lastCheck = now.toLocaleString();
+        person.total = (person.total || 0) + 1;
+        saveData();
+        renderTable();
+        showMessage(`Ingreso registrado para DNI ${cleanDni}. Total ingresos: ${person.total}.`);
       }
 
-      const exists = records.some((row) => row.dni === dni);
-      if (exists) {
-        alert("Ese DNI ya está en la lista.");
-        return;
-      }
+      function addPerson() {
+        const dni = normalizeDni(document.getElementById("new-dni").value);
+        const name = document.getElementById("new-name").value.trim();
+        if (!dni) {
+          alert("Ingresa un DNI válido.");
+          return;
+        }
 
-      records.push({ dni, name, lastCheck: "", total: 0 });
-      saveData();
-      renderTable();
-      document.getElementById("new-dni").value = "";
-      document.getElementById("new-name").value = "";
-      showMessage("Persona agregada al listado.");
-    }
+        const exists = records.some((row) => row.dni === dni);
+        if (exists) {
+          alert("Ese DNI ya está en la lista.");
+          return;
+        }
+
+        records.push({ dni, name, lastCheck: "", total: 0 });
+        saveData();
+        renderTable();
+        document.getElementById("new-dni").value = "";
+        document.getElementById("new-name").value = "";
+        showMessage("Persona agregada al listado.");
+      }
 
     function parseCsv(text) {
       return text
@@ -486,103 +546,112 @@
       return dniLabel ? dniLabel[1] : "";
     }
 
-    async function scanFrame() {
-      if (!cameraRunning || !detector || !videoEl) return;
-      try {
-        const codes = await detector.detect(videoEl);
-        const first = codes?.[0];
-        if (first?.rawValue) {
-          const extracted = extractDniFromText(first.rawValue);
-          if (extracted) {
-            document.getElementById("dni-input").value = extracted;
-            registerEntry(extracted);
+      async function scanFrame() {
+        if (!cameraRunning || !detector || !videoEl) return;
+        try {
+          const codes = await detector.detect(videoEl);
+          const first = codes?.[0];
+          if (first?.rawValue) {
+            const extracted = extractDniFromText(first.rawValue);
+            if (extracted) {
+              document.getElementById("dni-input").value = extracted;
+            }
+            updateScanPreview(first.rawValue, extracted);
           }
+        } catch (error) {
+          console.warn("No se pudo leer el cuadro de la cámara", error);
         }
-      } catch (error) {
-        console.warn("No se pudo leer el cuadro de la cámara", error);
-      }
-      scanHandle = requestAnimationFrame(scanFrame);
-    }
-
-    function stopCamera() {
-      if (scanHandle) cancelAnimationFrame(scanHandle);
-      scanHandle = null;
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-      if (videoEl) {
-        videoEl.srcObject = null;
-      }
-      cameraRunning = false;
-      document.getElementById("qr-region").innerHTML = "La cámara está apagada";
-      document.getElementById("toggle-scan").textContent = "Iniciar cámara";
-    }
-
-    async function toggleCamera() {
-      const qrRegion = document.getElementById("qr-region");
-      if (cameraRunning) {
-        stopCamera();
-        return;
+        scanHandle = requestAnimationFrame(scanFrame);
       }
 
-      if (!navigator.mediaDevices?.getUserMedia) {
-        qrRegion.textContent = "Tu navegador no permite acceder a la cámara.";
-        showMessage("La cámara no está disponible en este navegador.", "error");
-        return;
-      }
-
-      if (!("BarcodeDetector" in window)) {
-        qrRegion.textContent = "La detección de QR no está disponible en este navegador.";
-        showMessage("La lectura de QR requiere un navegador con BarcodeDetector.", "error");
-        return;
-      }
-
-      try {
-        detector = new BarcodeDetector({ formats: ["qr_code"] });
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if (!videoEl) {
-          videoEl = document.createElement("video");
-          videoEl.className = "scanner";
-          videoEl.setAttribute("autoplay", "true");
-          videoEl.setAttribute("playsinline", "true");
+      function stopCamera() {
+        if (scanHandle) cancelAnimationFrame(scanHandle);
+        scanHandle = null;
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
         }
-        qrRegion.innerHTML = "";
-        qrRegion.appendChild(videoEl);
-        videoEl.srcObject = stream;
-        await videoEl.play();
-        cameraRunning = true;
-        document.getElementById("toggle-scan").textContent = "Detener cámara";
-        scanFrame();
-      } catch (error) {
-        console.error("No se pudo iniciar la cámara", error);
-        qrRegion.textContent = "No se pudo acceder a la cámara.";
-        showMessage("No se pudo iniciar la cámara. Revisa los permisos del navegador.", "error");
-        stopCamera();
-      }
-    }
-
-    function init() {
-      records = loadData();
-      renderTable();
-      document.getElementById("check-btn").addEventListener("click", () => {
-        const dniValue = document.getElementById("dni-input").value;
-        registerEntry(dniValue);
-      });
-      document.getElementById("add-btn").addEventListener("click", addPerson);
-      document.getElementById("file-input").addEventListener("change", handleFileInput);
-      document.getElementById("upload-btn").addEventListener("click", () => {
-        document.getElementById("file-input").click();
-      });
-      document.getElementById("download-btn").addEventListener("click", downloadData);
-      document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
-      document.getElementById("dni-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          registerEntry(e.target.value);
+        if (videoEl) {
+          videoEl.srcObject = null;
         }
-      });
-    }
+        cameraRunning = false;
+        updateScanPreview("", "");
+        document.getElementById("qr-region").innerHTML = "La cámara está apagada";
+        document.getElementById("toggle-scan").textContent = "Iniciar cámara";
+      }
 
-    init();
+      async function toggleCamera() {
+        const qrRegion = document.getElementById("qr-region");
+        if (cameraRunning) {
+          stopCamera();
+          return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          qrRegion.textContent = "Tu navegador no permite acceder a la cámara.";
+          showMessage("La cámara no está disponible en este navegador.", "error");
+          return;
+        }
+
+        if (!("BarcodeDetector" in window)) {
+          qrRegion.textContent = "La detección de QR no está disponible en este navegador.";
+          showMessage("La lectura de QR requiere un navegador con BarcodeDetector.", "error");
+          return;
+        }
+
+        try {
+          detector = new BarcodeDetector({ formats: ["qr_code"] });
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          if (!videoEl) {
+            videoEl = document.createElement("video");
+            videoEl.className = "scanner";
+            videoEl.setAttribute("autoplay", "true");
+            videoEl.setAttribute("playsinline", "true");
+          }
+          qrRegion.innerHTML = "";
+          qrRegion.appendChild(videoEl);
+          videoEl.srcObject = stream;
+          await videoEl.play();
+          cameraRunning = true;
+          document.getElementById("toggle-scan").textContent = "Detener cámara";
+          scanFrame();
+        } catch (error) {
+          console.error("No se pudo iniciar la cámara", error);
+          qrRegion.textContent = "No se pudo acceder a la cámara.";
+          showMessage("No se pudo iniciar la cámara. Revisa los permisos del navegador.", "error");
+          stopCamera();
+        }
+      }
+
+      function init() {
+        records = loadData();
+        renderTable();
+        updateScanPreview("", "");
+        document.getElementById("check-btn").addEventListener("click", () => {
+          const dniValue = document.getElementById("dni-input").value;
+          registerEntry(dniValue);
+        });
+        document.getElementById("add-btn").addEventListener("click", addPerson);
+        document.getElementById("file-input").addEventListener("change", handleFileInput);
+        document.getElementById("upload-btn").addEventListener("click", () => {
+          document.getElementById("file-input").click();
+        });
+        document.getElementById("download-btn").addEventListener("click", downloadData);
+        document.getElementById("toggle-scan").addEventListener("click", toggleCamera);
+        document.getElementById("confirm-scan").addEventListener("click", () => {
+          if (!lastScannedDni) {
+            showMessage("Aún no hay un DNI detectado desde el QR.", "error");
+            return;
+          }
+          registerEntry(lastScannedDni);
+        });
+        document.getElementById("dni-input").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            registerEntry(e.target.value);
+          }
+        });
+      }
+
+      init();
   </script>
 </body>
 </html>
