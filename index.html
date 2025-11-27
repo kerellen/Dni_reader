@@ -351,6 +351,10 @@
       let lastScannedDni = "";
       let lastScannedRaw = "";
       const LOCAL_STORAGE_KEY = "dni_reader_records";
+      const API_BASE =
+        window.location.origin && window.location.origin !== "null"
+          ? window.location.origin
+          : "http://localhost:3000";
 
       function loadLocalRecords() {
         try {
@@ -392,7 +396,7 @@
       async function loadData() {
         const localCopy = loadLocalRecords();
         try {
-          const response = await fetch("/api/records");
+          const response = await fetch(`${API_BASE}/api/records`);
           if (!response.ok) throw new Error("Respuesta no válida del servidor");
           const payload = await response.json();
           if (Array.isArray(payload?.records)) {
@@ -417,7 +421,7 @@
 
       async function saveData() {
         try {
-          const response = await fetch("/api/records", {
+          const response = await fetch(`${API_BASE}/api/records`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(records),
