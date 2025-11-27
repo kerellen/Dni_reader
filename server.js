@@ -47,8 +47,17 @@ app.post('/api/records', (req, res) => {
     return res.status(400).json({ error: 'El formato de datos es inválido.' });
   }
   try {
-    writeRecords(incoming);
-    res.json({ ok: true });
+    const normalized = incoming
+      .map((row) => ({
+        dni: String(row?.dni || '').replace(/\D/g, ''),
+        name: row?.name ? String(row.name).trim() : '',
+        lastCheck: row?.lastCheck ? String(row.lastCheck) : '',
+        total: Number.isFinite(Number(row?.total)) ? Number(row.total) : 0,
+      }))
+      .filter((row) => row.dni);
+
+    writeRecords(normalized);
+    res.json({ ok: true, records: normalized });
   } catch (error) {
     console.error('No se pudo escribir el archivo de datos', error);
     res.status(500).json({ error: 'No se pudo guardar el archivo en el servidor.' });
