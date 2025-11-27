@@ -322,7 +322,7 @@
 
     <section class="card">
       <h2>Listado registrado</h2>
-      <div class="small" style="margin-bottom:0.5rem;">La información se guarda en tu navegador y puedes descargarla como CSV compatible con Excel en cualquier momento.</div>
+      <div class="small" style="margin-bottom:0.5rem;">La información se guarda en el servidor y puedes descargarla como CSV compatible con Excel en cualquier momento.</div>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -341,7 +341,6 @@
   </div>
 
     <script>
-      const STORAGE_KEY = "dni-checkin-data";
       let records = [];
       let editingDni = null;
       let cameraRunning = false;
@@ -370,18 +369,6 @@
       }
 
       async function loadData() {
-        const localData = (() => {
-          try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-              return JSON.parse(stored);
-            }
-          } catch (error) {
-            console.warn("No se pudo leer el almacenamiento local", error);
-          }
-          return [];
-        })();
-
         try {
           const response = await fetch("/api/records");
           if (!response.ok) throw new Error("Respuesta no válida del servidor");
@@ -390,31 +377,25 @@
             return payload.records;
           }
         } catch (error) {
-          console.warn("No se pudo sincronizar con el servidor, usando datos locales", error);
+          console.warn("No se pudo sincronizar con el servidor", error);
+          showMessage("No se pudo cargar la información desde el servidor.", "error");
         }
 
-        return localData;
-      }
-
-      async function syncServerData() {
-        try {
-          await fetch("/api/records", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(records),
-          });
-        } catch (error) {
-          console.warn("No se pudo guardar el archivo en el servidor", error);
-        }
+        return [];
       }
 
       async function saveData() {
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+          const response = await fetch("/api/records", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(records),
+          });
+          if (!response.ok) throw new Error("Respuesta no válida del servidor");
         } catch (error) {
-          console.warn("No se pudo guardar el listado localmente", error);
+          console.warn("No se pudo guardar el archivo en el servidor", error);
+          showMessage("No se pudo guardar la información en el servidor.", "error");
         }
-        await syncServerData();
       }
 
       function renderTable() {
