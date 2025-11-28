@@ -1,11 +1,8 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const { sql } = require('@vercel/postgres');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'registros_dni.json');
 
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
@@ -19,38 +16,61 @@ app.use((req, res, next) => {
 });
 app.use(express.static(__dirname));
 
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, '[]', 'utf-8');
-  }
+async function ensureTable() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS registros_dni (
+      dni VARCHAR(32) PRIMARY KEY,
+      name TEXT,
+      last_check TEXT,
+      total INTEGER DEFAULT 0
+    )
+  `;
 }
 
-function readRecords() {
-  ensureDataFile();
+async function readRecords() {
+  await ensureTable();
+  const { rows } = await sql`SELECT dni, name, last_check, total FROM registros_dni ORDER BY name ASC`;
+  return rows.map((row) => ({
+    dni: row.dni,
+    name: row.name || '',
+    lastCheck: row.last_check || '',
+    total: Number(row.total) || 0,
+  }));
+}
+
+async function writeRecords(records) {
+  await sql.begin(async (tx) => {
+    await tx`
+      CREATE TABLE IF NOT EXISTS registros_dni (
+        dni VARCHAR(32) PRIMARY KEY,
+        name TEXT,
+        last_check TEXT,
+        total INTEGER DEFAULT 0
+      )
+    `;
+
+    await tx`TRUNCATE TABLE registros_dni`;
+
+    for (const record of records) {
+      await tx`
+        INSERT INTO registros_dni (dni, name, last_check, total)
+        VALUES (${record.dni}, ${record.name}, ${record.lastCheck}, ${record.total})
+      `;
+    }
+  });
+}
+
+app.get('/api/records', async (req, res) => {
   try {
-    const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const records = await readRecords();
+    res.json({ records });
   } catch (error) {
-    console.error('No se pudo leer el archivo de datos', error);
-    return [];
+    console.error('No se pudo leer la base de datos', error);
+    res.status(500).json({ error: 'No se pudo obtener los registros desde la base de datos.' });
   }
-}
-
-function writeRecords(records) {
-  ensureDataFile();
-  fs.writeFileSync(DATA_FILE, JSON.stringify(records, null, 2), 'utf-8');
-}
-
-app.get('/api/records', (req, res) => {
-  const records = readRecords();
-  res.json({ records });
 });
 
-app.post('/api/records', (req, res) => {
+app.post('/api/records', async (req, res) => {
   const incoming = req.body;
   if (!Array.isArray(incoming)) {
     return res.status(400).json({ error: 'El formato de datos es inválido.' });
@@ -65,15 +85,14 @@ app.post('/api/records', (req, res) => {
       }))
       .filter((row) => row.dni);
 
-    writeRecords(normalized);
+    await writeRecords(normalized);
     res.json({ ok: true, records: normalized });
   } catch (error) {
-    console.error('No se pudo escribir el archivo de datos', error);
-    res.status(500).json({ error: 'No se pudo guardar el archivo en el servidor.' });
+    console.error('No se pudo escribir en la base de datos', error);
+    res.status(500).json({ error: 'No se pudo guardar los registros en la base de datos.' });
   }
 });
 
 app.listen(PORT, () => {
-  ensureDataFile();
   console.log(`Servidor iniciado en http://localhost:${PORT}`);
 });
