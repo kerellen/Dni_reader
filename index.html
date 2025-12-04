@@ -90,6 +90,7 @@
       background: rgba(255, 255, 255, 0.06);
       color: #e2e8f0;
       font-size: 1rem;
+      touch-action: manipulation;
     }
 
     input:focus,
@@ -200,6 +201,36 @@
       justify-content: flex-end;
     }
 
+    .mode-toggle {
+      display: inline-flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .chip {
+      border-radius: 999px;
+      padding: 0.55rem 0.9rem;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.05);
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .chip.active {
+      background: linear-gradient(135deg, #06b6d4, #3b82f6);
+      color: #0b1020;
+      border-color: transparent;
+      box-shadow: 0 10px 25px rgba(6, 182, 212, 0.35);
+    }
+
+    .chip:disabled,
+    .disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     .small {
       font-size: 0.9rem;
       color: #cbd5e1;
@@ -253,6 +284,12 @@
         font-size: 2rem;
       }
     }
+
+    @supports (padding: max(0px)) {
+      body {
+        padding-bottom: max(3rem, env(safe-area-inset-bottom));
+      }
+    }
   </style>
 </head>
 <body>
@@ -264,10 +301,21 @@
       </div>
       <div class="actions">
         <button class="secondary" id="download-btn" type="button">Descargar Excel (CSV)</button>
-        <button class="secondary" id="upload-btn" type="button">📂 Cargar listado</button>
-        <input id="file-input" type="file" accept=".csv,.txt" style="display:none" />
+        <button data-entry="file" class="secondary" id="upload-btn" type="button">📂 Cargar listado</button>
+        <input data-entry="file" id="file-input" type="file" accept=".csv,.txt" style="display:none" />
       </div>
     </header>
+
+    <section class="card">
+      <h2>Selecciona cómo cargar el listado</h2>
+      <div class="mode-toggle" role="group" aria-label="Modo de carga">
+        <button id="mode-manual" class="chip active" type="button">Ingresar manualmente</button>
+        <button id="mode-file" class="chip" type="button">Cargar archivo (Excel/CSV)</button>
+      </div>
+      <p id="mode-helper" class="small" style="margin-top:0.65rem;">
+        Solo un modo puede estar activo. Cambia a "Cargar archivo" si prefieres subir el listado desde Excel/CSV.
+      </p>
+    </section>
 
     <div class="grid two">
         <section class="card">
@@ -304,18 +352,18 @@
 
     <section class="card">
       <h2>Agregar persona autorizada</h2>
-      <div class="grid two">
-        <div>
-          <label for="new-dni">DNI</label>
-          <input id="new-dni" type="text" inputmode="numeric" placeholder="Ej: 20123456" />
+        <div class="grid two">
+          <div>
+            <label for="new-dni">DNI</label>
+          <input data-entry="manual" id="new-dni" type="text" inputmode="numeric" placeholder="Ej: 20123456" />
         </div>
         <div>
           <label for="new-name">Nombre</label>
-          <input id="new-name" type="text" placeholder="Nombre completo" />
+          <input data-entry="manual" id="new-name" type="text" placeholder="Nombre completo" />
         </div>
       </div>
       <div class="actions" style="margin-top:1rem;">
-        <button class="secondary" id="add-btn">Agregar a la lista</button>
+        <button data-entry="manual" class="secondary" id="add-btn">Agregar a la lista</button>
       </div>
       <p class="small" style="margin-top:0.75rem;">Si al iniciar la app no existe un archivo, se genera uno nuevo con las columnas DNI, Nombre, Último check-in y Total ingresos.</p>
     </section>
@@ -350,11 +398,15 @@
       let videoEl = null;
       let lastScannedDni = "";
       let lastScannedRaw = "";
+      let entryMode = "manual";
       const LOCAL_STORAGE_KEY = "dni_reader_records";
       const API_BASE =
         window.location.origin && window.location.origin !== "null"
           ? window.location.origin
           : "http://localhost:3000";
+
+      const isiOS = /iP(hone|od|ad)/i.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
       function loadLocalRecords() {
         try {
@@ -532,6 +584,10 @@
       }
 
       async function addPerson() {
+        if (entryMode !== "manual") {
+          showMessage("Activa el modo manual para poder agregar personas una por una.", "error");
+          return;
+        }
         const dni = normalizeDni(document.getElementById("new-dni").value);
         const name = document.getElementById("new-name").value.trim();
         if (!dni) {
@@ -600,50 +656,80 @@
         }
       }
 
-    function parseCsv(text) {
-      return text
-        .trim()
-        .split(/\r?\n/)
-        .map((line) => line.split(",").map((cell) => cell.trim()));
-    }
+      function syncEntryMode(mode) {
+        entryMode = mode;
+        const helper = document.getElementById("mode-helper");
+        document.getElementById("mode-manual").classList.toggle("active", mode === "manual");
+        document.getElementById("mode-file").classList.toggle("active", mode === "file");
 
-    async function handleFileInput(event) {
-      const file = event.target.files?.[0];
-      if (!file) return;
+        const manualEnabled = mode === "manual";
+        document.querySelectorAll('[data-entry="manual"]').forEach((el) => {
+          el.disabled = !manualEnabled;
+          el.classList.toggle("disabled", !manualEnabled);
+        });
 
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const text = e.target.result;
-          const rows = parseCsv(String(text));
-          const [header, ...body] = rows;
-          if (!header || normalizeDni(header[0]) !== "dni") {
-            throw new Error("Formato incompatible. Usa un CSV con encabezados DNI,Nombre,Último check-in,Total ingresos.");
-          }
-          records = body
-            .filter((row) => row.length)
-            .map((row) => ({
-              dni: normalizeDni(row[0]),
-              name: row[1] || "",
-              lastCheck: row[2] || "",
-              total: Number(row[3]) || 0,
-            }))
-            .filter((item) => item.dni);
-          await saveData();
-          renderTable();
-          showMessage("Listado cargado correctamente.");
-        } catch (error) {
-          console.error("Error al leer el archivo subido", error);
-          showMessage("El archivo no es válido o está dañado. Intenta con otro CSV.", "error");
-        } finally {
-          event.target.value = "";
+        const fileEnabled = mode === "file";
+        document.querySelectorAll('[data-entry="file"]').forEach((el) => {
+          el.disabled = !fileEnabled;
+          el.classList.toggle("disabled", !fileEnabled);
+        });
+
+        helper.textContent =
+          mode === "manual"
+            ? "Modo manual activo. Completa los campos para agregar autorizados."
+            : "Modo archivo activo. Sube un CSV/Excel para reemplazar el listado. Cambia a manual para editar a mano.";
+      }
+
+      function parseCsv(text) {
+        return text
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => line.split(",").map((cell) => cell.trim()));
+      }
+
+      async function handleFileInput(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (entryMode !== "file") {
+          syncEntryMode("file");
         }
-      };
-      reader.onerror = () => {
-        showMessage("No se pudo leer el archivo seleccionado.", "error");
-      };
-      reader.readAsText(file);
-    }
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const text = e.target.result;
+            const rows = parseCsv(String(text));
+            const [header, ...body] = rows;
+            if (!header || normalizeDni(header[0]) !== "dni") {
+              throw new Error(
+                "Formato incompatible. Usa un CSV con encabezados DNI,Nombre,Último check-in,Total ingresos."
+              );
+            }
+            records = body
+              .filter((row) => row.length)
+              .map((row) => ({
+                dni: normalizeDni(row[0]),
+                name: row[1] || "",
+                lastCheck: row[2] || "",
+                total: Number(row[3]) || 0,
+              }))
+              .filter((item) => item.dni);
+            await saveData();
+            renderTable();
+            showMessage("Listado cargado correctamente.");
+          } catch (error) {
+            console.error("Error al leer el archivo subido", error);
+            showMessage("El archivo no es válido o está dañado. Intenta con otro CSV.", "error");
+          } finally {
+            event.target.value = "";
+          }
+        };
+        reader.onerror = () => {
+          showMessage("No se pudo leer el archivo seleccionado.", "error");
+        };
+        reader.readAsText(file);
+      }
 
     function downloadData() {
       const header = "DNI,Nombre,Último check-in,Total ingresos";
@@ -735,8 +821,14 @@
         }
 
         if (!("BarcodeDetector" in window)) {
-          qrRegion.textContent = "La detección de QR no está disponible en este navegador.";
-          showMessage("La lectura de QR requiere un navegador con BarcodeDetector.", "error");
+          qrRegion.textContent =
+            "La detección de QR no está disponible nativamente. Usa la carga manual o por archivo en este dispositivo.";
+          showMessage(
+            isiOS
+              ? "En iPhone, habilita el modo archivo o ingresa manualmente mientras el navegador agrega soporte."
+              : "La lectura de QR requiere un navegador con BarcodeDetector.",
+            "error"
+          );
           return;
         }
 
@@ -752,6 +844,9 @@
             videoEl.className = "scanner";
             videoEl.setAttribute("autoplay", "true");
             videoEl.setAttribute("playsinline", "true");
+            videoEl.setAttribute("webkit-playsinline", "true");
+            videoEl.setAttribute("muted", "true");
+            videoEl.muted = true;
           }
           qrRegion.innerHTML = "";
           qrRegion.appendChild(videoEl);
@@ -772,6 +867,7 @@
         records = await loadData();
         renderTable();
         updateScanPreview("", "");
+        syncEntryMode("manual");
         document.getElementById("check-btn").addEventListener("click", () => {
           const dniValue = document.getElementById("dni-input").value;
           registerEntry(dniValue);
@@ -786,6 +882,8 @@
         document
           .getElementById("table-body")
           .addEventListener("click", handleTableClick);
+        document.getElementById("mode-manual").addEventListener("click", () => syncEntryMode("manual"));
+        document.getElementById("mode-file").addEventListener("click", () => syncEntryMode("file"));
         document.getElementById("confirm-scan").addEventListener("click", () => {
           if (!lastScannedDni) {
             showMessage("Aún no hay un DNI detectado desde el QR.", "error");
